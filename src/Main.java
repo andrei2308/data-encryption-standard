@@ -15,12 +15,12 @@ public class Main {
      * Main method that handles user input and demonstrates DES encryption/decryption.
      * <p>
      * Process:
-     * 1. Accepts plaintext as ASCII string input from user
-     * 2. Accepts encryption key as 16-character hexadecimal string (64 bits)
-     * 3. Encrypts the plaintext using DES algorithm
-     * 4. Displays the encrypted result in hexadecimal format
-     * 5. Decrypts the ciphertext back to original plaintext
-     * 6. Displays the decrypted result as ASCII text
+     * @1. Accepts plaintext as ASCII string input from user
+     * @2. Accepts encryption key as 16-character hexadecimal string (64 bits)
+     * @3. Encrypts the plaintext using DES algorithm
+     * @4. Displays the encrypted result in hexadecimal format
+     * @5. Decrypts the ciphertext back to original plaintext
+     * @6. Displays the decrypted result as ASCII text
      *
      * @param args command line arguments (not used)
      */

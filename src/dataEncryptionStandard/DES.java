@@ -31,13 +31,13 @@ public class DES {
      * Encrypts the plaintext using the DES algorithm.
      *
      * Process:
-     * 1. Apply initial permutation (IP) to the plaintext
-     * 2. Generate 16 round keys from the master key
-     * 3. Split permuted plaintext into left and right halves (32 bits each)
-     * 4. Apply 16 rounds of Feistel encryption
-     * 5. Swap and combine the final left and right halves
-     * 6. Apply final permutation (FP)
-     * 7. Convert result to hexadecimal string
+     * @1. Apply initial permutation (IP) to the plaintext
+     * @2. Generate 16 round keys from the master key
+     * @3. Split permuted plaintext into left and right halves (32 bits each)
+     * @4. Apply 16 rounds of Feistel encryption
+     * @5. Swap and combine the final left and right halves
+     * @6. Apply final permutation (FP)
+     * @7. Convert result to hexadecimal string
      *
      * @return the encrypted ciphertext as a hexadecimal string
      */
@@ -84,13 +84,13 @@ public class DES {
      * are applied in reverse order (round 15 to round 0).
      *
      * Process:
-     * 1. Apply initial permutation (IP) to the ciphertext
-     * 2. Generate 16 round keys from the master key
-     * 3. Split permuted ciphertext into left and right halves
-     * 4. Apply 16 rounds of Feistel decryption with reversed keys
-     * 5. Swap and combine the final left and right halves
-     * 6. Apply final permutation (FP)
-     * 7. Convert result back to ASCII string
+     * @1. Apply initial permutation (IP) to the ciphertext
+     * @2. Generate 16 round keys from the master key
+     * @3. Split permuted ciphertext into left and right halves
+     * @4. Apply 16 rounds of Feistel decryption with reversed keys
+     * @5. Swap and combine the final left and right halves
+     * @6. Apply final permutation (FP)
+     * @7. Convert result back to ASCII string
      *
      * @return the decrypted plaintext as an ASCII string
      */
@@ -132,12 +132,12 @@ public class DES {
      * Generates the 16 round keys from the master key.
      *
      * Process:
-     * 1. Apply Permuted Choice 1 (PC-1) to reduce 64-bit key to 56 bits
-     * 2. Split into two 28-bit halves (C and D)
-     * 3. For each of 16 rounds:
-     *    - Perform circular left shift on both halves (1 or 2 positions)
-     *    - Combine the shifted halves
-     *    - Apply Permuted Choice 2 (PC-2) to get 48-bit round key
+     * @1. Apply Permuted Choice 1 (PC-1) to reduce 64-bit key to 56 bits
+     * @2. Split into two 28-bit halves (C and D)
+     * @3. For each of 16 rounds:
+     *    @- Perform circular left shift on both halves (1 or 2 positions)
+     *    @- Combine the shifted halves
+     *    @- Apply Permuted Choice 2 (PC-2) to get 48-bit round key
      *
      * @param keyBits the 64-bit master key as a bit array
      * @return array of 16 round keys, each 48 bits long
@@ -173,10 +173,10 @@ public class DES {
      * The Feistel function (F-function) - the core of each DES round.
      *
      * Process:
-     * 1. Expand right half from 32 bits to 48 bits using expansion table
-     * 2. XOR the expanded right half with the round key
-     * 3. Apply 8 S-boxes to substitute and reduce from 48 bits to 32 bits
-     * 4. Apply P-box permutation to the S-box output
+     * @1. Expand right half from 32 bits to 48 bits using expansion table
+     * @2. XOR the expanded right half with the round key
+     * @3. Apply 8 S-boxes to substitute and reduce from 48 bits to 32 bits
+     * @4. Apply P-box permutation to the S-box output
      *
      * @param right the 32-bit right half of the data block
      * @param roundKey the 48-bit round key for this round
@@ -207,13 +207,13 @@ public class DES {
      * - Outputs 4 bits based on the S-box lookup table
      *
      * Process:
-     * 1. Split 48-bit input into 8 groups of 6 bits
-     * 2. For each 6-bit group:
-     *    - Extract row number from bits 0 and 5
-     *    - Extract column number from bits 1-4
-     *    - Look up value in corresponding S-box
-     *    - Convert 4-bit value to bit array
-     * 3. Concatenate all 8 outputs to form 32-bit result
+     * @1. Split 48-bit input into 8 groups of 6 bits
+     * @2. For each 6-bit group:
+     *    @- Extract row number from bits 0 and 5
+     *    @- Extract column number from bits 1-4
+     *    @- Look up value in corresponding S-box
+     *    @- Convert 4-bit value to bit array
+     * @3. Concatenate all 8 outputs to form 32-bit result
      *
      * @param input 48-bit input as 8 groups of 6 bits
      * @return 32-bit output as 8 groups of 4 bits
