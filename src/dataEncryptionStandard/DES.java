@@ -3,30 +3,38 @@ package dataEncryptionStandard;
 import static dataEncryptionStandard.Utils.*;
 
 /**
- * Implementation of the Data Encryption Standard (DES) algorithm.
+ * Implementation of the Data Encryption Standard (DES) algorithm with multi-block support.
  * <p>
  * DES is a symmetric-key block cipher that encrypts 64-bit blocks of data
  * using a 56-bit key through 16 rounds of Feistel network operations.
  * It was adopted as a federal standard in 1977 and remained widely used
  * until it was superseded by AES in 2001.
  * <p>
- * <b>Block Size:</b> 64 bits (8 bytes)<br>
- * <b>Key Size:</b> 56 bits effective (64 bits with 8 parity bits)<br>
- * <b>Rounds:</b> 16 Feistel rounds
+ * <b>Block size:</b> 64 bits (8 bytes)<br>
+ * <b>Key size:</b> 56 bits effective (64 bits with 8 parity bits)<br>
+ * <b>Rounds:</b> 16 Feistel rounds<br>
+ * <b>Mode of operation:</b> ECB (Electronic Codebook)
+ * <p>
+ * <b>Multi-block processing:</b> This implementation handles data of any length
+ * by splitting it into 8-byte blocks after padding. Each block is encrypted
+ * independently using ECB mode. For production use, consider implementing CBC,
+ * CTR, or GCM modes for better security.
  * <p>
  * <b>Padding:</b> This implementation uses PKCS#7 padding to handle plaintext
  * that is not a multiple of the 8-byte block size. The padding is automatically
  * added during encryption and removed during decryption. Users do not need to
  * manually pad their input data.
  * <p>
- * <b>Security Note:</b> DES is considered cryptographically weak by modern
- * standards due to its small key size. It should not be used for securing
- * sensitive data in production systems. Consider using AES instead.
+ * <b>Security note:</b> DES is considered cryptographically weak by modern
+ * standards due to its small key size. Additionally, ECB mode reveals patterns
+ * in data (identical plaintext blocks produce identical ciphertext blocks).
+ * This implementation should only be used for educational purposes. For production
+ * systems, use AES with GCM or CBC mode.
  * <p>
- * <b>Thread Safety:</b> This class is not thread-safe. Create separate instances
+ * <b>Thread safety:</b> This class is not thread-safe. Create separate instances
  * for concurrent encryption/decryption operations.
  * <p>
- * <b>Usage Example:</b>
+ * <b>Usage example:</b>
  * <pre>
  * byte[] plaintext = "Hello World".getBytes();
  * byte[] key = hexStringToBytes("133457799BBCDFF1");
@@ -39,7 +47,7 @@ import static dataEncryptionStandard.Utils.*;
  * </pre>
  *
  * @author Chitoiu Andrei
- * @version 1.0
+ * @version 2.0
  * @see <a href="https://en.wikipedia.org/wiki/Data_Encryption_Standard">DES on Wikipedia</a>
  */
 public class DES {
@@ -52,7 +60,7 @@ public class DES {
      * The data can be of any length; PKCS#7 padding will be applied
      * automatically during encryption to make it a multiple of 8 bytes.
      */
-    private final byte[] plainText;
+    private final byte[] data;
 
     /**
      * The 64-bit encryption/decryption key (with 8 parity bits).
@@ -73,154 +81,282 @@ public class DES {
      * and the encryption/decryption key. The same constructor is used for both
      * encryption and decryption operations.
      * <p>
-     * <b>For Encryption:</b> Pass the plaintext as the first parameter.<br>
-     * <b>For Decryption:</b> Pass the ciphertext (as bytes) as the first parameter.
+     * <b>For encryption:</b> Pass the plaintext as the first parameter.<br>
+     * <b>For decryption:</b> Pass the ciphertext (as bytes) as the first parameter.
      * <p>
      * The key must be exactly 8 bytes (64 bits) in length. DES will use 56 bits
      * of this key for encryption, ignoring the parity bits.
      *
-     * @param plainText the input data to be encrypted or decrypted
-     *                  (can be any length; padding will be applied if needed)
-     * @param key       the 64-bit key (8 bytes) used for encryption/decryption
-     * @throws NullPointerException if plainText or key is null
+     * @param data the input data to be encrypted or decrypted
+     *             (can be any length; padding will be applied if needed)
+     * @param key  the 64-bit key (8 bytes) used for encryption/decryption
+     * @throws NullPointerException if data or key is null
      */
-    public DES(byte[] plainText, byte[] key) {
-        this.plainText = plainText;
+    public DES(byte[] data, byte[] key) {
+        this.data = data;
         this.key = key;
     }
 
     /**
-     * Encrypts the plaintext using the DES algorithm.
+     * Encrypts the plaintext using the DES algorithm in ECB mode.
      * <p>
-     * This method performs the complete DES encryption process, which includes:
+     * This method performs the complete DES encryption process for data of any length:
      * <ol>
-     *   <li>Adding PKCS#7 padding to make plaintext a multiple of 8 bytes</li>
-     *   <li>Applying initial permutation (IP) to rearrange the bits</li>
-     *   <li>Generating 16 round keys from the master key</li>
-     *   <li>Splitting the permuted plaintext into left and right halves (32 bits each)</li>
-     *   <li>Applying 16 rounds of Feistel encryption with generated round keys</li>
-     *   <li>Swapping and combining the final left and right halves</li>
-     *   <li>Applying final permutation (FP) to produce the ciphertext</li>
-     *   <li>Converting the result to a hexadecimal string</li>
+     *   <li>Add PKCS#7 padding to make plaintext a multiple of 8 bytes</li>
+     *   <li>Generate 16 round keys from the master key</li>
+     *   <li>Split the padded data into 8-byte blocks</li>
+     *   <li>For each block:
+     *     <ul>
+     *       <li>Apply initial permutation (IP) to rearrange the bits</li>
+     *       <li>Split the permuted block into left and right halves (32 bits each)</li>
+     *       <li>Apply 16 rounds of Feistel encryption with generated round keys</li>
+     *       <li>Swap and combine the final left and right halves</li>
+     *       <li>Apply final permutation (FP) to produce the ciphertext block</li>
+     *     </ul>
+     *   </li>
+     *   <li>Concatenate all encrypted blocks</li>
+     *   <li>Convert the result to a hexadecimal string</li>
      * </ol>
      * <p>
-     * <b>Feistel Network:</b> Each round applies the Feistel function to the right
-     * half using the round key, XORs the result with the left half, then swaps
-     * the halves for the next round.
+     * <b>ECB mode:</b> Each 8-byte block is encrypted independently. This means
+     * identical plaintext blocks will produce identical ciphertext blocks, which
+     * can reveal patterns in the data. For better security, use CBC or GCM modes
+     * in production systems.
      * <p>
-     * <b>Output Format:</b> The ciphertext is returned as a hexadecimal string
+     * <b>Output format:</b> The ciphertext is returned as a hexadecimal string
      * where each byte is represented by two hexadecimal characters. The length
-     * of the output will always be a multiple of 16 characters (8 bytes).
+     * of the output will always be a multiple of 16 characters (8 bytes per block).
      * <p>
-     * <b>Example:</b>
+     * <b>Examples:</b>
      * <pre>
      * Input:  "Hello" (5 bytes)
      * Padded: "Hello" + [03 03 03] (8 bytes after padding)
+     * Blocks: 1 block of 8 bytes
      * Output: "85E813540F0AB405" (16 hex characters = 8 bytes)
+     *
+     * Input:  "Hello World!" (12 bytes)
+     * Padded: "Hello World!" + [04 04 04 04] (16 bytes after padding)
+     * Blocks: 2 blocks of 8 bytes each
+     * Output: "85E813540F0AB405A1B2C3D4E5F67890" (32 hex characters = 16 bytes)
      * </pre>
      *
      * @return the encrypted ciphertext as a hexadecimal string (uppercase)
      * @see #decrypt()
+     * @see #encryptBlock(byte[], int[][])
      * @see #addPKCS7Padding(byte[], int)
      */
     public String encrypt() {
-        // step 0: add PKCS#7 padding to make plaintext a multiple of block size
-        byte[] paddedPlainTextBytes = addPKCS7Padding(plainText, 8);
+        // Step 1: Add PKCS#7 padding to make data a multiple of block size (8 bytes)
+        byte[] paddedData = addPKCS7Padding(data, 8);
 
-        // prepare bit arrays from byte arrays
+        // Step 2: Generate 16 round keys from the master key (done once for all blocks)
         int[] keyBits = bytesToBits(key);
-        int[] plainTextBits = bytesToBits(paddedPlainTextBytes);
-
-        // step 1: initial permutation on plain text
-        // rearranges the 64 bits according to the IP table
-        int[] permutedPlainText = permute(plainTextBits, Constants.initialPermutationTable);
-
-        // step 2: generate 16 round keys from the master key
         int[][] roundKeys = generateRoundKeys(keyBits);
 
-        // step 3: split plaintext into 2 halves (L0 and R0)
-        int[][] LR = split(permutedPlainText);
-        int[] left = LR[0];   // left 32 bits
-        int[] right = LR[1];  // right 32 bits
+        // Step 3: Calculate number of 8-byte blocks
+        int numBlocks = paddedData.length / 8;
 
-        // step 4: apply 16 rounds of Feistel encryption
-        // In each round: L(i) = R(i-1), R(i) = L(i-1) XOR F(R(i-1), K(i))
-        for (int round = 0; round < 16; round++) {
-            int[] newRight = xor(left, feistel(right, roundKeys[round]));
-            left = right;
-            right = newRight;
+        // Step 4: Prepare array to hold all encrypted blocks
+        byte[] encryptedData = new byte[paddedData.length];
+
+        // Step 5: Encrypt each 8-byte block independently (ECB mode)
+        for (int blockIndex = 0; blockIndex < numBlocks; blockIndex++) {
+            // Extract one 8-byte block
+            byte[] block = new byte[8];
+            System.arraycopy(paddedData, blockIndex * 8, block, 0, 8);
+
+            // Encrypt this single block
+            byte[] encryptedBlock = encryptBlock(block, roundKeys);
+
+            // Store encrypted block in result array
+            System.arraycopy(encryptedBlock, 0, encryptedData, blockIndex * 8, 8);
         }
 
-        // step 5: combine right and left (swapped compared to final round)
-        // This is the "undo" of the final swap in the Feistel network
-        int[] combined = combine(right, left);
-
-        // step 6: apply final permutation (inverse of initial permutation)
-        int[] cipherBits = permute(combined, Constants.finalPermutation);
-
-        // step 7: convert bit array to bytes, then to hexadecimal string
-        byte[] cipherBytes = bitsToBytes(cipherBits);
-
-        return bytesToHexString(cipherBytes);
+        // Step 6: Convert all encrypted bytes to hexadecimal string
+        return bytesToHexString(encryptedData);
     }
 
     /**
-     * Decrypts the ciphertext using the DES algorithm.
+     * Decrypts the ciphertext using the DES algorithm in ECB mode.
      * <p>
      * DES decryption is structurally identical to encryption with one key difference:
      * the round keys are applied in reverse order (from round 15 down to round 0).
      * This property is a result of the Feistel network structure, which makes
      * encryption and decryption processes symmetric.
      * <p>
-     * The decryption process includes:
+     * The decryption process for multi-block data:
      * <ol>
-     *   <li>Converting ciphertext to bit array</li>
-     *   <li>Applying initial permutation (IP) to the ciphertext</li>
-     *   <li>Generating 16 round keys from the master key (same as encryption)</li>
-     *   <li>Splitting permuted ciphertext into left and right halves</li>
-     *   <li>Applying 16 rounds of Feistel decryption with <b>reversed</b> round keys</li>
-     *   <li>Swapping and combining the final left and right halves</li>
-     *   <li>Applying final permutation (FP) to recover the padded plaintext</li>
-     *   <li>Removing PKCS#7 padding to recover the original plaintext</li>
-     *   <li>Converting result back to an ASCII string</li>
+     *   <li>Generate 16 round keys from the master key (same as encryption)</li>
+     *   <li>Split the ciphertext into 8-byte blocks</li>
+     *   <li>For each block:
+     *     <ul>
+     *       <li>Apply initial permutation (IP) to the ciphertext block</li>
+     *       <li>Split permuted ciphertext into left and right halves</li>
+     *       <li>Apply 16 rounds of Feistel decryption with <b>reversed</b> round keys</li>
+     *       <li>Swap and combine the final left and right halves</li>
+     *       <li>Apply final permutation (FP) to recover the padded plaintext block</li>
+     *     </ul>
+     *   </li>
+     *   <li>Concatenate all decrypted blocks</li>
+     *   <li>Remove PKCS#7 padding to recover the original plaintext</li>
+     *   <li>Convert result back to an ASCII string</li>
      * </ol>
      * <p>
-     * <b>Key Reversal:</b> While the round keys are generated in the same way as
+     * <b>Key reversal:</b> While the round keys are generated in the same way as
      * during encryption, they are applied in reverse order: K15, K14, ..., K1, K0.
      * This reverses the encryption process and recovers the original plaintext.
      * <p>
-     * <b>Padding Removal:</b> After decryption, the PKCS#7 padding is validated
-     * and removed. If the padding is invalid (indicating wrong key or corrupted
-     * data), an exception will be thrown.
+     * <b>Padding removal:</b> After all blocks are decrypted, the PKCS#7 padding
+     * is validated and removed. If the padding is invalid (indicating wrong key or
+     * corrupted data), an exception will be thrown.
      * <p>
-     * <b>Example:</b>
+     * <b>Examples:</b>
      * <pre>
      * Input:  "85E813540F0AB405" (ciphertext as hex string converted to bytes)
+     * Blocks: 1 block of 8 bytes
      * Output: "Hello" (original plaintext after padding removal)
+     *
+     * Input:  "85E813540F0AB405A1B2C3D4E5F67890" (32 hex characters)
+     * Blocks: 2 blocks of 8 bytes each
+     * Output: "Hello World!" (original plaintext after padding removal)
      * </pre>
      *
      * @return the decrypted plaintext as an ASCII string
      * @throws RuntimeException if padding is invalid (wrong key or corrupted data)
      * @see #encrypt()
+     * @see #decryptBlock(byte[], int[][])
      * @see #removePKCS7Padding(byte[])
      */
     public String decrypt() {
-        // step 1: convert key and ciphertext to bit arrays
+        // Step 1: Generate 16 round keys from the master key (same as encryption)
         int[] keyBits = bytesToBits(key);
-        int[] cipherTextBits = bytesToBits(plainText); // reusing plainText field for ciphertext
-
-        // step 2: apply initial permutation to ciphertext
-        int[] permutedCipherText = permute(cipherTextBits, Constants.initialPermutationTable);
-
-        // step 3: generate round keys (same as encryption)
         int[][] roundKeys = generateRoundKeys(keyBits);
 
-        // step 4: split ciphertext into left and right halves
-        int[][] LR = split(permutedCipherText);
+        // Step 2: Calculate number of 8-byte blocks
+        int numBlocks = data.length / 8;
+
+        // Step 3: Prepare array to hold all decrypted blocks
+        byte[] decryptedData = new byte[data.length];
+
+        // Step 4: Decrypt each 8-byte block independently (ECB mode)
+        for (int blockIndex = 0; blockIndex < numBlocks; blockIndex++) {
+            // Extract one 8-byte block
+            byte[] block = new byte[8];
+            System.arraycopy(data, blockIndex * 8, block, 0, 8);
+
+            // Decrypt this single block
+            byte[] decryptedBlock = decryptBlock(block, roundKeys);
+
+            // Store decrypted block in result array
+            System.arraycopy(decryptedBlock, 0, decryptedData, blockIndex * 8, 8);
+        }
+
+        // Step 5: Remove PKCS#7 padding from all decrypted data
+        byte[] unpaddedData = removePKCS7Padding(decryptedData);
+
+        // Step 6: Convert bytes to string and return
+        return new String(unpaddedData);
+    }
+
+    /**
+     * Encrypts a single 8-byte block using the DES algorithm.
+     * <p>
+     * This method performs the core DES encryption on exactly one 64-bit block.
+     * It is called by the {@link #encrypt()} method for each block in the input data.
+     * <p>
+     * Process:
+     * <ol>
+     *   <li>Convert the 8-byte block to 64 bits</li>
+     *   <li>Apply initial permutation (IP) to rearrange the bits</li>
+     *   <li>Split into left and right halves (32 bits each)</li>
+     *   <li>Apply 16 rounds of Feistel encryption:
+     *     <ul>
+     *       <li>newRight = left XOR Feistel(right, roundKey[i])</li>
+     *       <li>left = right</li>
+     *       <li>right = newRight</li>
+     *     </ul>
+     *   </li>
+     *   <li>Combine right and left (swapped) into 64 bits</li>
+     *   <li>Apply final permutation (FP)</li>
+     *   <li>Convert 64 bits back to 8 bytes</li>
+     * </ol>
+     *
+     * @param block     the 8-byte block to encrypt (must be exactly 8 bytes)
+     * @param roundKeys the pre-generated 16 round keys (48 bits each)
+     * @return the encrypted 8-byte block
+     * @see #encrypt()
+     * @see #feistel(int[], int[])
+     */
+    private byte[] encryptBlock(byte[] block, int[][] roundKeys) {
+        // Step 1: Convert 8-byte block to 64-bit array
+        int[] blockBits = bytesToBits(block);
+
+        // Step 2: Apply initial permutation to rearrange bits
+        int[] permutedBlock = permute(blockBits, Constants.initialPermutationTable);
+
+        // Step 3: Split into left and right halves (32 bits each)
+        int[][] LR = split(permutedBlock);
+        int[] left = LR[0];   // L0: left 32 bits
+        int[] right = LR[1];  // R0: right 32 bits
+
+        // Step 4: Apply 16 rounds of Feistel encryption
+        // Formula: Li = Ri-1, Ri = Li-1 XOR F(Ri-1, Ki)
+        for (int round = 0; round < 16; round++) {
+            int[] newRight = xor(left, feistel(right, roundKeys[round]));
+            left = right;      // Li = Ri-1
+            right = newRight;  // Ri = Li-1 XOR F(Ri-1, Ki)
+        }
+
+        // Step 5: Combine right and left (note: swapped from final round)
+        // This "undo swap" is part of the Feistel structure
+        int[] combined = combine(right, left);
+
+        // Step 6: Apply final permutation (inverse of initial permutation)
+        int[] cipherBits = permute(combined, Constants.finalPermutation);
+
+        // Step 7: Convert 64-bit array back to 8-byte array
+        return bitsToBytes(cipherBits);
+    }
+
+    /**
+     * Decrypts a single 8-byte block using the DES algorithm.
+     * <p>
+     * This method performs the core DES decryption on exactly one 64-bit block.
+     * It is called by the {@link #decrypt()} method for each block in the ciphertext.
+     * <p>
+     * Decryption is identical to encryption except that the round keys are applied
+     * in reverse order (K15, K14, ..., K1, K0 instead of K0, K1, ..., K14, K15).
+     * <p>
+     * Process:
+     * <ol>
+     *   <li>Convert the 8-byte block to 64 bits</li>
+     *   <li>Apply initial permutation (IP)</li>
+     *   <li>Split into left and right halves (32 bits each)</li>
+     *   <li>Apply 16 rounds of Feistel decryption with <b>reversed keys</b></li>
+     *   <li>Combine right and left (swapped) into 64 bits</li>
+     *   <li>Apply final permutation (FP)</li>
+     *   <li>Convert 64 bits back to 8 bytes</li>
+     * </ol>
+     *
+     * @param block     the 8-byte ciphertext block to decrypt (must be exactly 8 bytes)
+     * @param roundKeys the pre-generated 16 round keys (48 bits each)
+     * @return the decrypted 8-byte block (still includes padding if present)
+     * @see #decrypt()
+     * @see #feistel(int[], int[])
+     */
+    private byte[] decryptBlock(byte[] block, int[][] roundKeys) {
+        // Step 1: Convert 8-byte block to 64-bit array
+        int[] blockBits = bytesToBits(block);
+
+        // Step 2: Apply initial permutation
+        int[] permutedBlock = permute(blockBits, Constants.initialPermutationTable);
+
+        // Step 3: Split into left and right halves
+        int[][] LR = split(permutedBlock);
         int[] left = LR[0];
         int[] right = LR[1];
 
-        // step 5: apply 16 rounds with round keys in REVERSE order
+        // Step 4: Apply 16 rounds with round keys in REVERSE order
         // This is the key difference between encryption and decryption
         for (int round = 15; round >= 0; round--) {
             int[] newRight = xor(left, feistel(right, roundKeys[round]));
@@ -228,17 +364,14 @@ public class DES {
             right = newRight;
         }
 
-        // step 6: combine right and left (swapped)
+        // Step 5: Combine right and left (swapped)
         int[] combined = combine(right, left);
 
-        // step 7: apply final permutation to get padded plaintext
+        // Step 6: Apply final permutation
         int[] plainBits = permute(combined, Constants.finalPermutation);
-        byte[] plainBytes = bitsToBytes(plainBits);
 
-        // step 8: remove PKCS#7 padding to recover original plaintext
-        byte[] unpaddedPlainTextBytes = removePKCS7Padding(plainBytes);
-
-        return new String(unpaddedPlainTextBytes);
+        // Step 7: Convert 64-bit array back to 8-byte array
+        return bitsToBytes(plainBits);
     }
 
     /**
@@ -265,7 +398,7 @@ public class DES {
      *   </li>
      * </ol>
      * <p>
-     * <b>Shift Schedule:</b> In rounds 1, 2, 9, and 16, both halves are shifted
+     * <b>Shift schedule:</b> In rounds 1, 2, 9, and 16, both halves are shifted
      * left by 1 position. In all other rounds, they are shifted by 2 positions.
      * This ensures good key distribution across all rounds.
      * <p>
@@ -280,28 +413,28 @@ public class DES {
      * @see Constants#circularLeftShiftRounds
      */
     private int[][] generateRoundKeys(int[] keyBits) {
-        // step 1: apply Permuted Choice 1 to get 56-bit key (dropping parity bits)
+        // Step 1: Apply Permuted Choice 1 to get 56-bit key (dropping parity bits)
         int[] permutedKey = permute(keyBits, Constants.permutedChoice1);
 
-        // step 2: split the 56-bit key into two 28-bit halves
+        // Step 2: Split the 56-bit key into two 28-bit halves
         int[][] CD = split(permutedKey);
-        int[] C = CD[0];  // left 28 bits
-        int[] D = CD[1];  // right 28 bits
+        int[] C = CD[0];  // C0: left 28 bits
+        int[] D = CD[1];  // D0: right 28 bits
 
-        // array to store all 16 round keys
+        // Array to store all 16 round keys
         int[][] roundKeys = new int[16][];
 
-        // step 3: generate 16 round keys
+        // Step 3: Generate 16 round keys
         for (int round = 0; round < 16; round++) {
-            // perform circular left shift (1 or 2 positions based on round)
+            // Perform circular left shift (1 or 2 positions based on round)
             C = leftShift(C, Constants.circularLeftShiftRounds[round]);
             D = leftShift(D, Constants.circularLeftShiftRounds[round]);
 
-            // combine shifted C and D to form 56-bit value
-            int[] CD_combined = combine(C, D);
+            // Combine shifted C and D to form 56-bit value
+            int[] combinedCD = combine(C, D);
 
-            // apply Permuted Choice 2 to get 48-bit round key
-            roundKeys[round] = permute(CD_combined, Constants.permutedChoice2);
+            // Apply Permuted Choice 2 to get 48-bit round key
+            roundKeys[round] = permute(combinedCD, Constants.permutedChoice2);
         }
 
         return roundKeys;
@@ -331,7 +464,7 @@ public class DES {
      *       the bits across the output.</li>
      * </ol>
      * <p>
-     * <b>Security Properties:</b>
+     * <b>Security properties:</b>
      * <ul>
      *   <li>The S-boxes provide <i>confusion</i> - making the relationship between
      *       ciphertext and key complex</li>
@@ -348,19 +481,19 @@ public class DES {
      * @see Constants#straightPermutationTable
      */
     private int[] feistel(int[] right, int[] roundKey) {
-        // step 1: expand the 32-bit right half to 48 bits
+        // Step 1: Expand the 32-bit right half to 48 bits
         // This duplicates certain bits to match the round key size
         int[] expanded = permute(right, Constants.expansionTable);
 
-        // step 2: XOR the expanded value with the round key
+        // Step 2: XOR the expanded value with the round key
         // This combines the data with the key material
         int[] xored = xor(expanded, roundKey);
 
-        // step 3: apply S-boxes for substitution (48 bits -> 32 bits)
+        // Step 3: Apply S-boxes for substitution (48 bits -> 32 bits)
         // S-boxes provide non-linearity and confusion
         int[] sBoxOutput = applySBoxes(xored);
 
-        // step 4: apply straight permutation (P-box) for diffusion
+        // Step 4: Apply straight permutation (P-box) for diffusion
         // This spreads bit changes across the entire output
         return permute(sBoxOutput, Constants.straightPermutationTable);
     }
@@ -373,12 +506,12 @@ public class DES {
      * that makes the relationship between plaintext, ciphertext, and key complex
      * and difficult to analyze.
      * <p>
-     * <b>How Each S-box Works:</b>
+     * <b>How each S-box works:</b>
      * <ul>
      *   <li><b>Input:</b> 6 bits (numbered 0-5 from left to right)</li>
-     *   <li><b>Row Selection:</b> The outer bits (bit 0 and bit 5) form a 2-bit
+     *   <li><b>Row selection:</b> The outer bits (bit 0 and bit 5) form a 2-bit
      *       row number (0-3)</li>
-     *   <li><b>Column Selection:</b> The inner bits (bits 1-4) form a 4-bit
+     *   <li><b>Column selection:</b> The inner bits (bits 1-4) form a 4-bit
      *       column number (0-15)</li>
      *   <li><b>Lookup:</b> Use the row and column to look up a value in the
      *       S-box table (each table is 4 rows × 16 columns)</li>
@@ -394,7 +527,7 @@ public class DES {
      * Output: [1 0 1 1]  (4 bits representing 11)
      * </pre>
      * <p>
-     * <b>The Complete Process:</b>
+     * <b>The complete process:</b>
      * <ol>
      *   <li>Split the 48-bit input into 8 groups of 6 bits</li>
      *   <li>Pass each 6-bit group through its corresponding S-box (S1-S8)</li>
@@ -402,7 +535,7 @@ public class DES {
      *   <li>Concatenate all 8 outputs to form the 32-bit result</li>
      * </ol>
      * <p>
-     * <b>Security Properties:</b> The S-boxes are carefully designed to:
+     * <b>Security properties:</b> The S-boxes are carefully designed to:
      * <ul>
      *   <li>Be resistant to differential cryptanalysis</li>
      *   <li>Be resistant to linear cryptanalysis</li>
@@ -416,31 +549,31 @@ public class DES {
      * @see Constants#sBoxes
      */
     private int[] applySBoxes(int[] input) {
-        // output will be 32 bits (8 S-boxes × 4 bits each)
+        // Output will be 32 bits (8 S-boxes × 4 bits each)
         int[] output = new int[32];
 
-        // process each of the 8 S-boxes
-        for (int i = 0; i < 8; i++) {
-            // step 1: extract 6 bits for this S-box
+        // Process each of the 8 S-boxes
+        for (int sBoxIndex = 0; sBoxIndex < 8; sBoxIndex++) {
+            // Step 1: Extract 6 bits for this S-box
             int[] sixBits = new int[6];
-            System.arraycopy(input, i * 6, sixBits, 0, 6);
+            System.arraycopy(input, sBoxIndex * 6, sixBits, 0, 6);
 
-            // step 2: calculate row from outer bits (first and last)
+            // Step 2: Calculate row from outer bits (first and last)
             // Row is formed by bit 0 (MSB) and bit 5 (LSB)
             int row = (sixBits[0] << 1) | sixBits[5];
 
-            // step 3: calculate column from inner 4 bits
+            // Step 3: Calculate column from inner 4 bits
             // Column is formed by bits 1, 2, 3, 4
-            int col = (sixBits[1] << 3) | (sixBits[2] << 2) |
+            int column = (sixBits[1] << 3) | (sixBits[2] << 2) |
                     (sixBits[3] << 1) | sixBits[4];
 
-            // step 4: look up value in the S-box table
-            int sBoxValue = Constants.sBoxes[i][row][col];
+            // Step 4: Look up value in the S-box table
+            int sBoxValue = Constants.sBoxes[sBoxIndex][row][column];
 
-            // step 5: convert the 4-bit value to bit array and store in output
+            // Step 5: Convert the 4-bit value to bit array and store in output
             // The value (0-15) is converted to 4 bits, MSB first
-            for (int j = 0; j < 4; j++) {
-                output[i * 4 + j] = (sBoxValue >> (3 - j)) & 1;
+            for (int bitIndex = 0; bitIndex < 4; bitIndex++) {
+                output[sBoxIndex * 4 + bitIndex] = (sBoxValue >> (3 - bitIndex)) & 1;
             }
         }
         return output;
@@ -493,18 +626,18 @@ public class DES {
      * @see <a href="https://tools.ietf.org/html/rfc5652#section-6.3">RFC 5652 - PKCS#7 Padding</a>
      */
     private byte[] addPKCS7Padding(byte[] input, int blockSize) {
-        // calculate how many padding bytes are needed
-        // if input.length % blockSize == 0, we add a full block
+        // Calculate how many padding bytes are needed
+        // If input.length % blockSize == 0, we add a full block
         int paddingLength = blockSize - (input.length % blockSize);
 
-        // create new array with room for original data + padding
+        // Create new array with room for original data + padding
         byte[] padded = new byte[input.length + paddingLength];
 
-        // copy original data to the beginning of the new array
+        // Copy original data to the beginning of the new array
         System.arraycopy(input, 0, padded, 0, input.length);
 
-        // add padding bytes, each with value equal to the padding length
-        // this makes the padding self-describing
+        // Add padding bytes, each with value equal to the padding length
+        // This makes the padding self-describing
         for (int i = input.length; i < padded.length; i++) {
             padded[i] = (byte) paddingLength;
         }
@@ -520,7 +653,7 @@ public class DES {
      * padding usually indicates either data corruption or use of an incorrect
      * decryption key (padding oracle attacks exploit this).
      * <p>
-     * <b>Validation and Removal Process:</b>
+     * <b>Validation and removal process:</b>
      * <ol>
      *   <li>Read the value N of the last byte</li>
      *   <li>Verify that 1 ≤ N ≤ data length</li>
@@ -529,7 +662,7 @@ public class DES {
      *   <li>If validation fails, throw an exception</li>
      * </ol>
      * <p>
-     * <b>Why Validation is Critical:</b>
+     * <b>Why validation is critical:</b>
      * <ul>
      *   <li>Prevents incorrect data truncation</li>
      *   <li>Detects corrupted ciphertext</li>
@@ -539,7 +672,7 @@ public class DES {
      *       implementation would be needed for complete protection)</li>
      * </ul>
      * <p>
-     * <b>Example Validation Process (block size = 8):</b>
+     * <b>Example validation process (block size = 8):</b>
      * <pre>
      * Input:  [48 45 4C 4C 4F 03 03 03] = "HELLO" + padding
      * Step 1: Last byte = 03, so expect 3 padding bytes
@@ -549,7 +682,7 @@ public class DES {
      * Output: [48 45 4C 4C 4F] = "HELLO"
      * </pre>
      * <p>
-     * <b>Invalid Padding Examples (would throw RuntimeException):</b>
+     * <b>Invalid padding examples (would throw RuntimeException):</b>
      * <ul>
      *   <li><b>[48 45 4C 4C 4F 03 03 04]</b>
      *       <br>Last byte says 04, but only 1 byte of 04 exists
@@ -564,7 +697,7 @@ public class DES {
      *       <br>Error: "PKCS7 Padding is empty"</li>
      * </ul>
      * <p>
-     * <b>The & 0xFF Operation:</b><br>
+     * <b>The & 0xFF operation:</b><br>
      * Java bytes are signed (-128 to 127), but padding values are unsigned (0-255).
      * The bitwise AND with 0xFF converts a signed byte to its unsigned integer
      * equivalent: -1 becomes 255, -2 becomes 254, etc.
@@ -589,24 +722,24 @@ public class DES {
      * @see <a href="https://tools.ietf.org/html/rfc5652#section-6.3">RFC 5652 - PKCS#7 Padding</a>
      */
     private byte[] removePKCS7Padding(byte[] input) {
-        // validate that input is not empty
+        // Validate that input is not empty
         if (input.length == 0) {
-            throw new RuntimeException("PKCS7 Padding is empty");
+            throw new RuntimeException("Cannot remove padding from empty data");
         }
 
-        // read the last byte to determine how many padding bytes to remove
+        // Read the last byte to determine how many padding bytes to remove
         // & 0xFF converts signed byte (-128 to 127) to unsigned int (0 to 255)
         int paddingLength = input[input.length - 1] & 0xFF;
 
-        // validate that padding length is reasonable
-        // it must be at least 1 (minimum padding) and at most the data length
+        // Validate that padding length is reasonable
+        // It must be at least 1 (minimum padding) and at most the data length
         if (paddingLength < 1 || paddingLength > input.length) {
             throw new RuntimeException("Invalid padding length: " + paddingLength +
                     " (data length: " + input.length + ")");
         }
 
-        // validate that all padding bytes have the correct value
-        // this ensures the padding is valid and not corrupted
+        // Validate that all padding bytes have the correct value
+        // This ensures the padding is valid and not corrupted
         for (int i = input.length - paddingLength; i < input.length; i++) {
             if ((input[i] & 0xFF) != paddingLength) {
                 throw new RuntimeException("Invalid padding bytes at position " + i +
@@ -615,7 +748,7 @@ public class DES {
             }
         }
 
-        // create new array without the padding bytes
+        // Create new array without the padding bytes
         byte[] unpadded = new byte[input.length - paddingLength];
         System.arraycopy(input, 0, unpadded, 0, unpadded.length);
 

@@ -49,7 +49,7 @@ import java.util.Scanner;
  * during decryption.
  *
  * @author Chitoiu Andrei
- * @version 1.0
+ * @version 2.0
  * @see DES
  * @see Utils
  */
