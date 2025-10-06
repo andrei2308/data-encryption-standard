@@ -7,14 +7,14 @@ import java.util.Scanner;
  * Main class for demonstrating DES encryption and decryption functionality.
  * <p>
  * This interactive program allows users to encrypt plaintext using the Data
- * Encryption Standard (DES) algorithm with a user-provided key, and then
- * decrypt the ciphertext back to verify the implementation works correctly.
+ * Encryption Standard (DES) algorithm in CBC mode with a user-provided key,
+ * and then decrypt the ciphertext back to verify the implementation works correctly.
  * <p>
  * <b>Program Flow:</b>
  * <ol>
  *   <li>Prompts user to enter plaintext (any ASCII string)</li>
  *   <li>Prompts user to enter a 64-bit encryption key as 16 hexadecimal characters</li>
- *   <li>Encrypts the plaintext using DES with PKCS#7 padding</li>
+ *   <li>Encrypts the plaintext using DES in CBC mode with PKCS#7 padding</li>
  *   <li>Displays the encrypted ciphertext in hexadecimal format</li>
  *   <li>Decrypts the ciphertext back to the original plaintext</li>
  *   <li>Displays the decrypted result to verify correctness</li>
@@ -31,7 +31,7 @@ import java.util.Scanner;
  * <b>Security Warning:</b> DES is cryptographically weak by modern standards
  * due to its 56-bit effective key size. This implementation is for educational
  * purposes and should not be used to protect sensitive data in production
- * environments. Consider using AES instead for real-world applications.
+ * environments. Use AES-256 with GCM mode for real-world applications.
  * <p>
  * <b>Example Usage:</b>
  * <pre>
@@ -47,9 +47,14 @@ import java.util.Scanner;
  * because PKCS#7 padding is automatically applied to make the plaintext a
  * multiple of 8 bytes (DES block size). The padding is automatically removed
  * during decryption.
+ * <p>
+ * <b>Note on CBC Mode:</b> This implementation uses CBC (Cipher Block Chaining) mode,
+ * which provides better security than ECB mode by XORing each plaintext block with
+ * the previous ciphertext block. A random Initialization Vector (IV) is generated
+ * for each encryption and must be transferred to enable decryption.
  *
  * @author Chitoiu Andrei
- * @version 2.0
+ * @version 3.0
  * @see DES
  * @see Utils
  */
@@ -65,7 +70,7 @@ public class Main {
      *       <li>Converts plaintext string to byte array</li>
      *       <li>Converts hex key string to byte array</li>
      *       <li>Creates DES cipher instance with plaintext and key</li>
-     *       <li>Encrypts using DES algorithm (includes automatic PKCS#7 padding)</li>
+     *       <li>Encrypts using DES algorithm in CBC mode (includes automatic PKCS#7 padding and IV generation)</li>
      *       <li>Displays resulting ciphertext in hexadecimal format</li>
      *     </ul>
      *   </li>
@@ -73,8 +78,9 @@ public class Main {
      *     <ul>
      *       <li>Converts hex ciphertext back to byte array</li>
      *       <li>Creates new DES cipher instance with ciphertext and same key</li>
+     *       <li>Transfers the IV from encryption to decryption instance</li>
      *       <li>Decrypts using DES algorithm (includes automatic padding removal)</li>
-     *       <li>Displays recovered plaintext as ASCII string</li>
+     *       <li>Displays recovered plaintext as string</li>
      *     </ul>
      *   </li>
      * </ol>
@@ -93,6 +99,7 @@ public class Main {
      *   <li>The key is not valid hexadecimal or wrong length</li>
      *   <li>The decryption key doesn't match the encryption key</li>
      *   <li>The ciphertext is corrupted or modified</li>
+     *   <li>The IV is not set before decryption</li>
      * </ul>
      * <p>
      * <b>Example Execution:</b>
@@ -108,10 +115,11 @@ public class Main {
      * <p>
      * <b>Technical Details:</b>
      * <ul>
-     *   <li>Uses UTF-8 encoding for string to byte conversion (default)</li>
+     *   <li>Uses system default encoding for string to byte conversion (typically UTF-8)</li>
      *   <li>Plaintext of any length is supported (padding applied automatically)</li>
      *   <li>Output ciphertext length is always a multiple of 16 hex chars (8 bytes)</li>
-     *   <li>Same key must be used for encryption and decryption</li>
+     *   <li>Same key and IV must be used for encryption and decryption</li>
+     *   <li>CBC mode provides better security than ECB by chaining blocks together</li>
      * </ul>
      * <p>
      * <b>Why Two DES Instances?</b><br>
@@ -119,12 +127,20 @@ public class Main {
      * because the DES constructor takes the data to be processed (plaintext for
      * encryption, ciphertext for decryption) as a parameter. This design treats
      * DES as a stateless operation on fixed data.
+     * <p>
+     * <b>IV Transfer:</b><br>
+     * In CBC mode, the Initialization Vector (IV) generated during encryption must
+     * be transferred to the decryption instance using {@code setIvBits()}. In a real
+     * system, the IV would be transmitted alongside the ciphertext (it doesn't need
+     * to be kept secret, but must be authentic).
      *
      * @param args command line arguments (not used in this implementation)
      * @throws NumberFormatException if the key contains invalid hexadecimal characters
      * @throws RuntimeException if padding validation fails during decryption
+     * @throws RuntimeException if IV is not set before decryption
      * @see DES#encrypt()
      * @see DES#decrypt()
+     * @see DES#setIvBits(int[])
      * @see Utils#hexStringToBytes(String)
      */
     public static void main(String[] args) {
@@ -132,7 +148,7 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         // ===== STEP 1: Get plaintext input from user =====
-        // The plaintext can be any ASCII string of any length
+        // The plaintext can be any string of any length
         // PKCS#7 padding will be automatically applied during encryption
         System.out.println("Enter the plain text: ");
         String plainText = scanner.nextLine();
@@ -145,20 +161,21 @@ public class Main {
         String keyHex = scanner.nextLine();
 
         // ===== STEP 3: Encrypt the plaintext =====
-        // Convert plaintext string to byte array using default encoding (UTF-8)
+        // Convert plaintext string to byte array using default encoding
         byte[] plainTextBytes = plainText.getBytes();
 
         // Convert hex key string to byte array
-        // Example: "133457799BBCDFF1" → [13, 34, 57, 79, 9B, BC, DF, F1]
+        // Example: "133457799BBCDFF1" → [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1]
         byte[] keyBytes = Utils.hexStringToBytes(keyHex);
 
         // Create DES cipher instance for encryption
         // The cipher is initialized with plaintext and key
-        DES des = new DES(plainTextBytes, keyBytes);
+        DES encryptDes = new DES(plainTextBytes, keyBytes);
 
         // Perform encryption
-        // This applies PKCS#7 padding, runs 16 rounds of DES, and returns hex string
-        String encrypted = des.encrypt();
+        // This generates a random IV, applies PKCS#7 padding, runs 16 rounds of DES
+        // in CBC mode, and returns the ciphertext as a hex string
+        String encrypted = encryptDes.encrypt();
 
         // ===== STEP 4: Display encrypted result =====
         // The result is shown in hexadecimal format for readability
@@ -171,11 +188,17 @@ public class Main {
 
         // Create new DES cipher instance for decryption
         // Note: We use the SAME key as encryption, but pass ciphertext as data
-        DES desDecrypt = new DES(encryptedBytes, keyBytes);
+        DES decryptDes = new DES(encryptedBytes, keyBytes);
+
+        // Transfer the IV from encryption to decryption
+        // In CBC mode, the same IV used during encryption must be used for decryption
+        // In a real system, the IV would be transmitted with the ciphertext
+        decryptDes.setIvBits(encryptDes.getIvBits());
 
         // Perform decryption
-        // This runs 16 rounds with reversed key order, then removes PKCS#7 padding
-        String decrypted = desDecrypt.decrypt();
+        // This runs 16 rounds with reversed key order in CBC mode,
+        // then removes PKCS#7 padding
+        String decrypted = decryptDes.decrypt();
 
         // ===== STEP 6: Display decrypted result =====
         // If everything worked correctly, this should match the original plaintext
@@ -184,11 +207,14 @@ public class Main {
         // Close scanner to prevent resource leak
         scanner.close();
 
-        // Note: In a production application, you would:
-        // 1. Validate all inputs before processing
+        // Note: In a production application, you should:
+        // 1. Validate all inputs before processing (key format, length, etc.)
         // 2. Use try-catch blocks for proper error handling
         // 3. Clear sensitive data (key, plaintext) from memory after use
-        // 4. Use a stronger algorithm like AES instead of DES
-        // 5. Consider using a proper key derivation function (KDF) for user passwords
+        // 4. Use a stronger algorithm like AES-256 instead of DES
+        // 5. Use authenticated encryption (like AES-GCM) to prevent tampering
+        // 6. Consider using a proper key derivation function (KDF) for user passwords
+        // 7. Transmit or store the IV alongside the ciphertext
+        // 8. Use proper key management and never hardcode keys
     }
 }

@@ -1,9 +1,14 @@
 package dataEncryptionStandard;
 
+import javax.crypto.spec.IvParameterSpec;
+
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+
 import static dataEncryptionStandard.Utils.*;
 
 /**
- * Implementation of the Data Encryption Standard (DES) algorithm with multi-block support.
+ * Implementation of the Data Encryption Standard (DES) algorithm with CBC mode support.
  * <p>
  * DES is a symmetric-key block cipher that encrypts 64-bit blocks of data
  * using a 56-bit key through 16 rounds of Feistel network operations.
@@ -13,12 +18,12 @@ import static dataEncryptionStandard.Utils.*;
  * <b>Block size:</b> 64 bits (8 bytes)<br>
  * <b>Key size:</b> 56 bits effective (64 bits with 8 parity bits)<br>
  * <b>Rounds:</b> 16 Feistel rounds<br>
- * <b>Mode of operation:</b> ECB (Electronic Codebook)
+ * <b>Mode of operation:</b> CBC (Cipher Block Chaining)
  * <p>
  * <b>Multi-block processing:</b> This implementation handles data of any length
  * by splitting it into 8-byte blocks after padding. Each block is encrypted
- * independently using ECB mode. For production use, consider implementing CBC,
- * CTR, or GCM modes for better security.
+ * using CBC mode, where each plaintext block is XORed with the previous ciphertext
+ * block before encryption. This provides better security than ECB mode.
  * <p>
  * <b>Padding:</b> This implementation uses PKCS#7 padding to handle plaintext
  * that is not a multiple of the 8-byte block size. The padding is automatically
@@ -26,10 +31,8 @@ import static dataEncryptionStandard.Utils.*;
  * manually pad their input data.
  * <p>
  * <b>Security note:</b> DES is considered cryptographically weak by modern
- * standards due to its small key size. Additionally, ECB mode reveals patterns
- * in data (identical plaintext blocks produce identical ciphertext blocks).
- * This implementation should only be used for educational purposes. For production
- * systems, use AES with GCM or CBC mode.
+ * standards due to its small key size. This implementation should only be used
+ * for educational purposes. For production systems, use AES with GCM or CBC mode.
  * <p>
  * <b>Thread safety:</b> This class is not thread-safe. Create separate instances
  * for concurrent encryption/decryption operations.
@@ -43,11 +46,12 @@ import static dataEncryptionStandard.Utils.*;
  * String encrypted = des.encrypt();
  *
  * DES des2 = new DES(hexStringToBytes(encrypted), key);
+ * des2.setIvBits(des.getIvBits()); // Transfer IV for decryption
  * String decrypted = des2.decrypt();
  * </pre>
  *
  * @author Chitoiu Andrei
- * @version 2.0
+ * @version 3.0
  * @see <a href="https://en.wikipedia.org/wiki/Data_Encryption_Standard">DES on Wikipedia</a>
  */
 public class DES {
@@ -75,6 +79,18 @@ public class DES {
     private final byte[] key;
 
     /**
+     * The Initialization Vector (IV) used for CBC mode encryption/decryption.
+     * <p>
+     * The IV is a 64-bit (8-byte) random value used to initialize CBC mode.
+     * It ensures that encrypting the same plaintext multiple times produces
+     * different ciphertexts, preventing pattern analysis.
+     * <p>
+     * For encryption: automatically generated using SecureRandom.
+     * For decryption: must be set to the same IV used during encryption.
+     */
+    private int[] ivBits;
+
+    /**
      * Constructs a DES cipher instance with the given plaintext/ciphertext and key.
      * <p>
      * This constructor initializes the DES cipher with the data to be processed
@@ -82,7 +98,8 @@ public class DES {
      * encryption and decryption operations.
      * <p>
      * <b>For encryption:</b> Pass the plaintext as the first parameter.<br>
-     * <b>For decryption:</b> Pass the ciphertext (as bytes) as the first parameter.
+     * <b>For decryption:</b> Pass the ciphertext (as bytes) as the first parameter
+     * and ensure to set the IV using {@link #setIvBits(int[])} before calling decrypt.
      * <p>
      * The key must be exactly 8 bytes (64 bits) in length. DES will use 56 bits
      * of this key for encryption, ignoring the parity bits.
@@ -98,15 +115,17 @@ public class DES {
     }
 
     /**
-     * Encrypts the plaintext using the DES algorithm in ECB mode.
+     * Encrypts the plaintext using the DES algorithm in CBC mode.
      * <p>
      * This method performs the complete DES encryption process for data of any length:
      * <ol>
      *   <li>Add PKCS#7 padding to make plaintext a multiple of 8 bytes</li>
      *   <li>Generate 16 round keys from the master key</li>
+     *   <li>Generate a random Initialization Vector (IV)</li>
      *   <li>Split the padded data into 8-byte blocks</li>
      *   <li>For each block:
      *     <ul>
+     *       <li>XOR the plaintext block with the previous ciphertext block (or IV for first block)</li>
      *       <li>Apply initial permutation (IP) to rearrange the bits</li>
      *       <li>Split the permuted block into left and right halves (32 bits each)</li>
      *       <li>Apply 16 rounds of Feistel encryption with generated round keys</li>
@@ -118,10 +137,9 @@ public class DES {
      *   <li>Convert the result to a hexadecimal string</li>
      * </ol>
      * <p>
-     * <b>ECB mode:</b> Each 8-byte block is encrypted independently. This means
-     * identical plaintext blocks will produce identical ciphertext blocks, which
-     * can reveal patterns in the data. For better security, use CBC or GCM modes
-     * in production systems.
+     * <b>CBC mode:</b> Each plaintext block is XORed with the previous ciphertext block
+     * before encryption. The first block is XORed with the IV. This ensures that identical
+     * plaintext blocks produce different ciphertext blocks, preventing pattern analysis.
      * <p>
      * <b>Output format:</b> The ciphertext is returned as a hexadecimal string
      * where each byte is represented by two hexadecimal characters. The length
@@ -159,32 +177,50 @@ public class DES {
         // Step 4: Prepare array to hold all encrypted blocks
         byte[] encryptedData = new byte[paddedData.length];
 
-        // Step 5: Encrypt each 8-byte block independently (ECB mode)
-        for (int blockIndex = 0; blockIndex < numBlocks; blockIndex++) {
-            // Extract one 8-byte block
-            byte[] block = new byte[8];
-            System.arraycopy(paddedData, blockIndex * 8, block, 0, 8);
+        // Step 5: Generate random IV for CBC mode
+        generateIv();
 
-            // Encrypt this single block
-            byte[] encryptedBlock = encryptBlock(block, roundKeys);
+        // Step 6: Process first block (XOR with IV)
+        byte[] firstBlock = new byte[8];
+        System.arraycopy(paddedData, 0, firstBlock, 0, 8);
+        int[] firstBlockBits = bytesToBits(firstBlock);
+        byte[] xoredFirstBlock = bitsToBytes(xor(this.ivBits, firstBlockBits));
+        byte[] encryptedFirstBlock = encryptBlock(xoredFirstBlock, roundKeys);
+        System.arraycopy(encryptedFirstBlock, 0, encryptedData, 0, 8);
+
+        // Step 7: Encrypt remaining blocks (CBC mode - XOR with previous ciphertext)
+        for (int blockIndex = 1; blockIndex < numBlocks; blockIndex++) {
+            // Extract one 8-byte plaintext block
+            byte[] currentBlock = new byte[8];
+            System.arraycopy(paddedData, blockIndex * 8, currentBlock, 0, 8);
+
+            // Get previous ciphertext block for XOR
+            byte[] previousCipherBlock = new byte[8];
+            System.arraycopy(encryptedData, (blockIndex - 1) * 8, previousCipherBlock, 0, 8);
+
+            // XOR current plaintext with previous ciphertext (CBC chaining)
+            byte[] xoredBlock = bitsToBytes(xor(bytesToBits(previousCipherBlock), bytesToBits(currentBlock)));
+
+            // Encrypt the XORed block
+            byte[] encryptedBlock = encryptBlock(xoredBlock, roundKeys);
 
             // Store encrypted block in result array
             System.arraycopy(encryptedBlock, 0, encryptedData, blockIndex * 8, 8);
         }
 
-        // Step 6: Convert all encrypted bytes to hexadecimal string
+        // Step 8: Convert all encrypted bytes to hexadecimal string
         return bytesToHexString(encryptedData);
     }
 
     /**
-     * Decrypts the ciphertext using the DES algorithm in ECB mode.
+     * Decrypts the ciphertext using the DES algorithm in CBC mode.
      * <p>
      * DES decryption is structurally identical to encryption with one key difference:
      * the round keys are applied in reverse order (from round 15 down to round 0).
      * This property is a result of the Feistel network structure, which makes
      * encryption and decryption processes symmetric.
      * <p>
-     * The decryption process for multi-block data:
+     * The decryption process for multi-block data in CBC mode:
      * <ol>
      *   <li>Generate 16 round keys from the master key (same as encryption)</li>
      *   <li>Split the ciphertext into 8-byte blocks</li>
@@ -194,17 +230,22 @@ public class DES {
      *       <li>Split permuted ciphertext into left and right halves</li>
      *       <li>Apply 16 rounds of Feistel decryption with <b>reversed</b> round keys</li>
      *       <li>Swap and combine the final left and right halves</li>
-     *       <li>Apply final permutation (FP) to recover the padded plaintext block</li>
+     *       <li>Apply final permutation (FP) to get intermediate result</li>
+     *       <li>XOR with previous ciphertext block (or IV for first block) to get plaintext</li>
      *     </ul>
      *   </li>
      *   <li>Concatenate all decrypted blocks</li>
      *   <li>Remove PKCS#7 padding to recover the original plaintext</li>
-     *   <li>Convert result back to an ASCII string</li>
+     *   <li>Convert result back to a string</li>
      * </ol>
      * <p>
      * <b>Key reversal:</b> While the round keys are generated in the same way as
      * during encryption, they are applied in reverse order: K15, K14, ..., K1, K0.
      * This reverses the encryption process and recovers the original plaintext.
+     * <p>
+     * <b>CBC mode decryption:</b> After decrypting each block with DES, the result
+     * is XORed with the previous ciphertext block (or IV for the first block) to
+     * recover the original plaintext. This reverses the CBC chaining process.
      * <p>
      * <b>Padding removal:</b> After all blocks are decrypted, the PKCS#7 padding
      * is validated and removed. If the padding is invalid (indicating wrong key or
@@ -221,41 +262,92 @@ public class DES {
      * Output: "Hello World!" (original plaintext after padding removal)
      * </pre>
      *
-     * @return the decrypted plaintext as an ASCII string
+     * @return the decrypted plaintext as a string
      * @throws RuntimeException if padding is invalid (wrong key or corrupted data)
+     * @throws RuntimeException if IV has not been set (call {@link #setIvBits(int[])} first)
      * @see #encrypt()
      * @see #decryptBlock(byte[], int[][])
      * @see #removePKCS7Padding(byte[])
      */
     public String decrypt() {
-        // Step 1: Generate 16 round keys from the master key (same as encryption)
+        // Validate that IV has been set
+        if (ivBits == null) {
+            throw new RuntimeException("IV must be set before decryption. Call setIvBits() first.");
+        }
+
+        // Step 1: Generate 16 round keys
         int[] keyBits = bytesToBits(key);
         int[][] roundKeys = generateRoundKeys(keyBits);
 
-        // Step 2: Calculate number of 8-byte blocks
+        // Step 2: Determine number of blocks
         int numBlocks = data.length / 8;
-
-        // Step 3: Prepare array to hold all decrypted blocks
         byte[] decryptedData = new byte[data.length];
 
-        // Step 4: Decrypt each 8-byte block independently (ECB mode)
-        for (int blockIndex = 0; blockIndex < numBlocks; blockIndex++) {
-            // Extract one 8-byte block
-            byte[] block = new byte[8];
-            System.arraycopy(data, blockIndex * 8, block, 0, 8);
+        // Step 3: Process first block (XOR with IV after decryption)
+        byte[] firstCipherBlock = new byte[8];
+        System.arraycopy(data, 0, firstCipherBlock, 0, 8);
 
-            // Decrypt this single block
-            byte[] decryptedBlock = decryptBlock(block, roundKeys);
+        // Decrypt first ciphertext block
+        byte[] decryptedFirstBlock = decryptBlock(firstCipherBlock, roundKeys);
+        // XOR with IV to get plaintext
+        byte[] firstPlainBlock = bitsToBytes(xor(bytesToBits(decryptedFirstBlock), this.ivBits));
+        // Store plaintext
+        System.arraycopy(firstPlainBlock, 0, decryptedData, 0, 8);
 
-            // Store decrypted block in result array
-            System.arraycopy(decryptedBlock, 0, decryptedData, blockIndex * 8, 8);
+        // Step 4: Process subsequent blocks (CBC mode - XOR with previous ciphertext)
+        for (int blockIndex = 1; blockIndex < numBlocks; blockIndex++) {
+            byte[] currentCipherBlock = new byte[8];
+            System.arraycopy(data, blockIndex * 8, currentCipherBlock, 0, 8);
+
+            // Decrypt ciphertext block
+            byte[] decryptedBlock = decryptBlock(currentCipherBlock, roundKeys);
+
+            // XOR with previous ciphertext block to get plaintext (CBC unchaining)
+            byte[] previousCipherBlock = new byte[8];
+            System.arraycopy(data, (blockIndex - 1) * 8, previousCipherBlock, 0, 8);
+
+            byte[] plainBlock = bitsToBytes(xor(bytesToBits(decryptedBlock), bytesToBits(previousCipherBlock)));
+
+            // Store plaintext
+            System.arraycopy(plainBlock, 0, decryptedData, blockIndex * 8, 8);
         }
 
-        // Step 5: Remove PKCS#7 padding from all decrypted data
+        // Step 5: Remove padding
         byte[] unpaddedData = removePKCS7Padding(decryptedData);
 
-        // Step 6: Convert bytes to string and return
         return new String(unpaddedData);
+    }
+
+    /**
+     * Generates a random 64-bit Initialization Vector (IV) for CBC mode.
+     * <p>
+     * The IV is generated using SHA1PRNG (Secure Hash Algorithm 1 Pseudo-Random Number Generator)
+     * which provides cryptographically strong random numbers suitable for cryptographic operations.
+     * <p>
+     * The generated IV is stored in {@link #ivBits} and must be transmitted along with
+     * the ciphertext (or stored) so that the recipient can decrypt the message. The IV
+     * does not need to be kept secret, but it must be unique for each encryption operation
+     * with the same key.
+     * <p>
+     * <b>Security properties:</b>
+     * <ul>
+     *   <li>Random: unpredictable and different for each encryption</li>
+     *   <li>Unique: should never be reused with the same key</li>
+     *   <li>Public: does not need to be kept secret (but must be authentic)</li>
+     * </ul>
+     *
+     * @throws RuntimeException if SHA1PRNG algorithm is not available
+     */
+    private void generateIv() {
+        try {
+            SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
+            byte[] iv = new byte[8];
+            random.nextBytes(iv);
+
+            this.ivBits = bytesToBits(new IvParameterSpec(iv).getIV());
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("Failed to generate IV: SHA1PRNG algorithm not available", e);
+        }
     }
 
     /**
@@ -651,7 +743,7 @@ public class DES {
      * This method validates and removes PKCS#7 padding to recover the original
      * plaintext. Validation is critical for security and data integrity - invalid
      * padding usually indicates either data corruption or use of an incorrect
-     * decryption key (padding oracle attacks exploit this).
+     * decryption key.
      * <p>
      * <b>Validation and removal process:</b>
      * <ol>
@@ -668,8 +760,7 @@ public class DES {
      *   <li>Detects corrupted ciphertext</li>
      *   <li>Detects wrong decryption key</li>
      *   <li>Ensures the padding was properly applied during encryption</li>
-     *   <li>Protects against padding oracle attacks (though timing-safe
-     *       implementation would be needed for complete protection)</li>
+     *   <li>Protects against certain padding oracle attacks</li>
      * </ul>
      * <p>
      * <b>Example validation process (block size = 8):</b>
@@ -685,16 +776,16 @@ public class DES {
      * <b>Invalid padding examples (would throw RuntimeException):</b>
      * <ul>
      *   <li><b>[48 45 4C 4C 4F 03 03 04]</b>
-     *       <br>Last byte says 04, but only 1 byte of 04 exists
+     *       <br>Last byte says 04, but not all last 4 bytes are 04
      *       <br>Error: "Invalid padding bytes"</li>
      *   <li><b>[48 45 4C 4C 4F 03 02 01]</b>
-     *       <br>Last byte says 01, but should be 03
+     *       <br>Last byte says 01, but should be at least 03
      *       <br>Error: "Invalid padding bytes"</li>
      *   <li><b>[48 45]</b> with last byte = 09
      *       <br>Last byte says remove 9 bytes, but only 2 bytes exist
      *       <br>Error: "Invalid padding length"</li>
      *   <li><b>[]</b> (empty array)
-     *       <br>Error: "PKCS7 Padding is empty"</li>
+     *       <br>Error: "Cannot remove padding from empty data"</li>
      * </ul>
      * <p>
      * <b>The & 0xFF operation:</b><br>
@@ -753,5 +844,43 @@ public class DES {
         System.arraycopy(input, 0, unpadded, 0, unpadded.length);
 
         return unpadded;
+    }
+
+    /**
+     * Gets the Initialization Vector (IV) used for CBC mode.
+     * <p>
+     * The IV is required for decryption and should be transmitted along with
+     * the ciphertext. It does not need to be kept secret but must be authentic
+     * (not tampered with).
+     *
+     * @return the IV as a bit array (64 bits), or null if not yet generated
+     * @see #setIvBits(int[])
+     */
+    public int[] getIvBits() {
+        return ivBits;
+    }
+
+    /**
+     * Sets the Initialization Vector (IV) for CBC mode decryption.
+     * <p>
+     * This method must be called before {@link #decrypt()} to provide the IV
+     * that was used during encryption. The IV should be the same value that
+     * was obtained from {@link #getIvBits()} after encryption.
+     * <p>
+     * <b>Important:</b> The IV must match the one used during encryption,
+     * otherwise decryption will produce incorrect plaintext.
+     *
+     * @param ivBits the IV as a bit array (must be exactly 64 bits)
+     * @throws IllegalArgumentException if ivBits is null or not 64 bits long
+     * @see #getIvBits()
+     */
+    public void setIvBits(int[] ivBits) {
+        if (ivBits == null) {
+            throw new IllegalArgumentException("IV cannot be null");
+        }
+        if (ivBits.length != 64) {
+            throw new IllegalArgumentException("IV must be exactly 64 bits, got " + ivBits.length);
+        }
+        this.ivBits = ivBits;
     }
 }
